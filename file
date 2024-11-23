@@ -1,0 +1,195 @@
+#Download the zipfile from the URL
+
+import requests
+
+# URL of the ZIP file
+url = "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
+
+# Define headers with a user-agent
+headers = {
+    "User-Agent": "Pradap (pradapmadasamy@gmail.com)"
+}
+
+# Make the request to download the file
+response = requests.get(url, headers=headers, stream=True)
+
+# Check if the request was successful
+if response.status_code == 200:
+    # Save the file
+    with open("C:/Users/prada/Downloads/downloaded_file.zip", "wb") as file:
+        for chunk in response.iter_content(chunk_size=8192):
+            file.write(chunk)
+    print("File downloaded successfully.")
+else:
+    print("Failed to download file. Status code:", response.status_code)
+
+
+#Using the zipfile module to extract the data from the zipfile
+
+import os
+import zipfile
+
+def extract_zipfile(zip_file_path, extract_to_dir):
+    """
+    Extracts the contents of a zip file to a specified directory.
+
+    :param zip_file_path: Path to the zip file
+    :param extract_to_dir: Directory where files should be extracted
+    """
+    # Ensure the output directory exists
+    if not os.path.exists(extract_to_dir):
+        os.makedirs(extract_to_dir)
+
+    # Open the zip file
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        # Extract all contents to the specified directory
+        zip_ref.extractall(extract_to_dir)
+
+    print(f"Contents extracted to: {extract_to_dir}")
+
+zip_file_path = "C:/Users/prada/Downloads/downloaded_file.zip" 
+extract_to_dir = "C:/Users/prada/Downloads/New folder" 
+
+extract_zipfile(zip_file_path, extract_to_dir)
+
+
+#Store the extracted data to S3
+
+import boto3
+import os
+
+# AWS S3 Configuration
+S3_BUCKET_NAME = 'companyjsonfiles'
+S3_FOLDER_NAME = 'folder/'  
+extract_dir = "C:/Users/prada/Downloads/New folder"    
+
+# Initialize S3 client
+s3_client = boto3.client('s3',
+    aws_access_key_id='AKIAZKDIDORJTONDZXY6',
+    aws_secret_access_key='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',
+    region_name='eu-north-1')
+
+# Upload each JSON file to S3
+for file_name in os.listdir(extract_dir):
+    file_path = os.path.join(extract_dir, file_name)
+    
+    # Check if it's a file and has .json extension
+    if os.path.isfile(file_path) and file_name.endswith('.json'):
+        s3_key = f"{S3_FOLDER_NAME}{file_name}"  # S3 object key (folder + filename)
+        
+        # Upload the file
+        with open(file_path, "rb") as f:
+            s3_client.upload_fileobj(f, S3_BUCKET_NAME, s3_key)
+        
+        print(f"Uploaded {file_name} to S3 bucket '{S3_BUCKET_NAME}' with key '{s3_key}'")
+
+print("All JSON files uploaded to S3 successfully.")
+
+#Load the data from S3 into RDS
+
+pip install mysql-connector-python
+pip install sqlalchemy pymysql
+
+from sqlalchemy import create_engine
+
+# Database configuration
+db_user = 'admin'
+db_password = 'root12345'
+db_host = 'database-1.cto8g4suo45h.us-east-1.rds.amazonaws.com'
+db_port = '3306' 
+
+# Create SQLAlchemy engine for MySQL 
+engine = create_engine(f'mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}')
+
+# Test connection
+connection = engine.connect()
+print("Connection to RDS successful.")
+
+import pymysql
+
+connection = pymysql.connect(
+    host='database-1.cto8g4suo45h.us-east-1.rds.amazonaws.com',
+    user='admin',
+    password='root12345',
+    port= 3306  # Default MySQL port
+)
+
+# Create a cursor object to interact with the database
+cursor = connection.cursor()
+
+# SQL query to create a new database
+cursor.execute("CREATE DATABASE database1")
+
+# Switch to the newly created database
+cursor.execute("USE database1")
+
+# SQL query to create a table
+create_table_query = """
+CREATE TABLE table1 (
+    CIK INT AUTO_INCREMENT PRIMARY KEY,
+    ENTITYNAME VARCHAR(100),
+    FACTS  VARCHAR(100)
+)
+"""
+cursor.execute(create_table_query)
+
+# Commit the changes
+connection.commit()
+
+# Close the connection
+cursor.close()
+connection.close()
+
+print("Database and table created successfully!")
+
+
+import boto3
+import pandas as pd
+from sqlalchemy import create_engine
+import os
+import json
+
+# AWS S3 and RDS configuration
+s3_bucket_name = 'companyjsonfiles'
+folder_path = 's3://companyjsonfiles/folder/'
+aws_access_key_id = 'AKIAZKDIDORJTONDZXY6'
+aws_secret_access_key = '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'
+region_name = 'eu-north-1'
+
+# MySQL RDS configuration
+rds_host = 'database-1.cto8g4suo45h.us-east-1.rds.amazonaws.com'
+rds_user = 'admin'
+rds_password = 'root12345'
+rds_db = 'database1'
+rds_port = 3306  # Default MySQL port
+
+# Create a boto3 client
+s3 = boto3.client('s3', aws_access_key_id=aws_access_key_id,
+                  aws_secret_access_key=aws_secret_access_key,
+                  region_name=region_name)
+
+# SQLAlchemy engine setup for MySQL
+engine = create_engine(f'mysql+pymysql://{rds_user}:{rds_password}@{rds_host}:{rds_port}/{rds_db}')
+
+# Fetch list of JSON files from the S3 folder
+objects = s3.list_objects_v2(Bucket=s3_bucket_name, Prefix=folder_path)
+
+# Loop through all the files and load them into MySQL
+for obj in objects.get('Contents', []):
+    file_key = obj['Key']
+    file_name = os.path.basename(file_key)
+    
+    # Download the file from S3 to local memory or temp file
+    json_data = s3.get_object(Bucket=s3_bucket_name, Key=file_key)
+    data = json_data['Body'].read().decode('utf-8')
+    
+    # Load JSON data into a DataFrame
+    df = pd.read_json(data)
+    
+    # Optionally, inspect the DataFrame to ensure it is in the correct format
+    print(f"Loaded data from {file_name}, preview: \n{df.head()}")
+    
+    # Load the DataFrame into the MySQL RDS table (replace 'your_table_name')
+    df.to_sql(name='table1', con=engine, if_exists='append', index=False)
+
+print("All JSON files have been successfully loaded to RDS.")
